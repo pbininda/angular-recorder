@@ -29,202 +29,6 @@ angular.module('angularAudioRecorder.config', [])
     PAUSED: 2
   })
 ;
-angular.module('angularAudioRecorder.directives', [
-  'angularAudioRecorder.config',
-  'angularAudioRecorder.services',
-  'angularAudioRecorder.controllers'
-]);
-angular.module('angularAudioRecorder.directives')
-  .directive('ngAudioRecorderAnalyzer', ['recorderService', 'recorderUtils',
-    function (service, utils) {
-
-      var link = function (scope, element, attrs, recorder) {
-        if (!service.isHtml5) {
-          scope.hide = true;
-          return;
-        }
-
-        var canvasWidth, canvasHeight, rafID, analyserContext, props = service.$html5AudioProps;
-
-        function updateAnalysers(time) {
-
-          if (!analyserContext) {
-            var canvas = element.find("canvas")[0];
-
-            if (attrs.width && !isNaN(attrs.width)) {
-              canvas.width = attrs.width;
-            }
-
-            if (attrs.height && !isNaN(attrs.height)) {
-              canvas.height = parseInt(attrs.height);
-            }
-
-            canvasWidth = canvas.width;
-            canvasHeight = canvas.height;
-            analyserContext = canvas.getContext('2d');
-          }
-
-          // analyzer draw code here
-          {
-            var SPACING = 3;
-            var BAR_WIDTH = 1;
-            var numBars = Math.round(canvasWidth / SPACING);
-            var freqByteData = new Uint8Array(props.analyserNode.frequencyBinCount);
-
-            props.analyserNode.getByteFrequencyData(freqByteData);
-
-            analyserContext.clearRect(0, 0, canvasWidth, canvasHeight);
-            //analyserContext.fillStyle = '#F6D565';
-            analyserContext.lineCap = 'round';
-            var multiplier = props.analyserNode.frequencyBinCount / numBars;
-
-            // Draw rectangle for each frequency bin.
-            for (var i = 0; i < numBars; ++i) {
-              var magnitude = 0;
-              var offset = Math.floor(i * multiplier);
-              // gotta sum/average the block, or we miss narrow-bandwidth spikes
-              for (var j = 0; j < multiplier; j++)
-                magnitude += freqByteData[offset + j];
-              magnitude = magnitude / multiplier;
-              var magnitude2 = freqByteData[i * multiplier];
-              if (attrs.waveColor)
-                analyserContext.fillStyle = attrs.waveColor;
-              else
-                analyserContext.fillStyle = "hsl( " + Math.round((i * 360) / numBars) + ", 100%, 50%)";
-              analyserContext.fillRect(i * SPACING, canvasHeight, BAR_WIDTH, -magnitude);
-            }
-          }
-
-          rafID = window.requestAnimationFrame(updateAnalysers);
-        }
-
-        function cancelAnalyserUpdates() {
-          window.cancelAnimationFrame(rafID);
-          rafID = null;
-        }
-
-        element.on('$destroy', function () {
-          cancelAnalyserUpdates();
-        });
-
-        recorder.onRecordStart = (function (original) {
-          return function () {
-            original.apply();
-            updateAnalysers();
-          };
-        })(recorder.onRecordStart);
-
-        utils.appendActionToCallback(recorder, 'onRecordStart', updateAnalysers, 'analyzer');
-        utils.appendActionToCallback(recorder, 'onRecordComplete', cancelAnalyserUpdates, 'analyzer');
-      };
-
-      return {
-        restrict: 'E',
-        require: '^ngAudioRecorder',
-        template: '<div ng-if="!hide" class="audioRecorder-analyzer">' +
-        '<canvas class="analyzer" width="1200" height="400" style="max-width: 100%;"></canvas>' +
-        '</div>',
-        link: link
-      };
-
-    }
-  ]);
-angular.module('angularAudioRecorder.directives')
-  .directive('ngAudioRecorderWaveView', ['recorderService', 'recorderUtils', '$log',
-    function (service, utils, $log) {
-
-      return {
-        restrict: 'E',
-        require: '^ngAudioRecorder',
-        link: function (scope, $element, attrs, recorder) {
-          if (!window.WaveSurfer) {
-            $log.warn('WaveSurfer was found.');
-            return;
-          }
-
-          var audioPlayer;
-          $element.html('<div class="waveSurfer"></div>');
-          var options = angular.extend({container: $element.find('div')[0]}, attrs);
-          var waveSurfer = WaveSurfer.create(options);
-          waveSurfer.setVolume(0);
-          utils.appendActionToCallback(recorder, 'onPlaybackStart|onPlaybackResume', function () {
-            waveSurfer.play();
-          }, 'waveView');
-          utils.appendActionToCallback(recorder, 'onPlaybackComplete|onPlaybackPause', function () {
-            waveSurfer.pause();
-          }, 'waveView');
-
-          utils.appendActionToCallback(recorder, 'onRecordComplete', function () {
-            if (!audioPlayer) {
-              audioPlayer = recorder.getAudioPlayer();
-              audioPlayer.addEventListener('seeking', function (e) {
-                var progress = audioPlayer.currentTime / audioPlayer.duration;
-                waveSurfer.seekTo(progress);
-              });
-            }
-          }, 'waveView');
-
-
-          scope.$watch(function () {
-            return recorder.audioModel;
-          }, function (newBlob) {
-            if (newBlob instanceof Blob) {
-              waveSurfer.loadBlob(newBlob);
-            }
-          });
-        }
-      };
-    }]);
-angular.module('angularAudioRecorder.directives')
-  .directive('ngAudioRecorder', ['recorderService', '$timeout',
-    function (recorderService, $timeout) {
-      return {
-        restrict: 'EA',
-        scope: {
-          audioModel: '=',
-          id: '@',
-          onRecordStart: '&',
-          onRecordComplete: '&',
-          onPlaybackComplete: '&',
-          onPlaybackStart: '&',
-          onPlaybackPause: '&',
-          onPlaybackResume: '&',
-          onConversionStart: '&',
-          onConversionComplete: '&',
-          showPlayer: '=?',
-          autoStart: '=?',
-          convertMp3: '=?',
-          timeLimit: '=?'
-        },
-        controllerAs: 'recorder',
-        bindToController: true,
-        template: function (element, attrs) {
-          return '<div class="audioRecorder">' +
-            '<div style="width: 250px; margin: 0 auto;"><div id="audioRecorder-fwrecorder"></div></div>' +
-            element.html() +
-            '</div>';
-        },
-        controller: 'recorderController',
-        link: function (scope, element, attrs) {
-          $timeout(function () {
-            if (recorderService.isAvailable && !(recorderService.isHtml5 || recorderService.isCordova)) {
-              var params = {
-                'allowscriptaccess': 'always'
-              }, attrs = {
-                'id': 'recorder-app',
-                'name': 'recorder-app'
-              }, flashVars = {
-                'save_text': ''
-              };
-              swfobject.embedSWF(recorderService.getSwfUrl(), "audioRecorder-fwrecorder", "0", "0", "11.0.0", "", flashVars, params, attrs);
-            }
-          }, 100);
-
-        }
-      };
-    }
-  ]);
-
 angular.module('angularAudioRecorder.controllers', [
   'angularAudioRecorder.config',
   'angularAudioRecorder.services'
@@ -265,6 +69,8 @@ var RecorderController = function (element, service, recorderUtils, $scope, $tim
       return $scope.$apply(fn);
     }
   };
+
+  var audioContext = new AudioContext();
 
   var control = this,
     cordovaMedia = {
@@ -513,17 +319,51 @@ var RecorderController = function (element, service, recorderUtils, $scope, $tim
       });
     } else if (service.isHtml5) {
       recordHandler.stop();
-      recordHandler.getBuffer(function () {
-        recordHandler.exportWAV(function (blob) {
-          completed(blob);
-          scopeApply();
-        });
+      recordHandler.getBuffer(function (buffers) {
+        if (service.mp3Config.targetSampleRate && service.mp3Config.targetSampleRate !== buffers.sampleRate) {
+            var audioBuffer = audioContext.createBuffer(1, buffers.data[0].length, buffers.sampleRate);
+            audioBuffer.copyToChannel(buffers.data[0], 0);
+            resampleAudioBuffer(audioBuffer, service.mp3Config.targetSampleRate, function(resampeledBuffer) {
+                var buffer = [
+                    resampeledBuffer.getChannelData(0),
+                    []];
+                recordHandler.putBuffer(buffer, service.mp3Config.targetSampleRate);
+                recordHandler.exportWAV(function (blob) {
+                  completed(blob);
+                  scopeApply();
+                });
+            });
+        }
+        else {
+            recordHandler.exportWAV(function (blob) {
+              completed(blob);
+              scopeApply();
+            });
+        }
       });
     } else {
       recordHandler.stopRecording(id);
       completed(recordHandler.getBlob(id));
     }
   };
+
+  function resampleAudioBuffer(audioBuffer, targetSampleRate, done) {
+      var numCh_ = audioBuffer.numberOfChannels;
+      var numFrames_ = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
+
+      var offlineContext_ = new OfflineAudioContext(numCh_, numFrames_, targetSampleRate);
+      var bufferSource_ = offlineContext_.createBufferSource();
+      bufferSource_.buffer = audioBuffer;
+
+      offlineContext_.oncomplete = function(event) {
+          var resampeledBuffer = event.renderedBuffer;
+          done(resampeledBuffer);
+      };
+
+      bufferSource_.connect(offlineContext_.destination);
+      bufferSource_.start(0);
+      offlineContext_.startRendering();
+  }
 
   control.playbackRecording = function () {
     if (status.isPlaying || !service.isAvailable() || status.isRecording || !control.audioModel) {
@@ -611,6 +451,203 @@ RecorderController.$inject = ['$element', 'recorderService', 'recorderUtils', '$
 angular.module('angularAudioRecorder.controllers')
   .controller('recorderController', RecorderController)
 ;
+
+angular.module('angularAudioRecorder.directives', [
+  'angularAudioRecorder.config',
+  'angularAudioRecorder.services',
+  'angularAudioRecorder.controllers'
+]);
+angular.module('angularAudioRecorder.directives')
+  .directive('ngAudioRecorderAnalyzer', ['recorderService', 'recorderUtils',
+    function (service, utils) {
+
+      var link = function (scope, element, attrs, recorder) {
+        if (!service.isHtml5) {
+          scope.hide = true;
+          return;
+        }
+
+        var canvasWidth, canvasHeight, rafID, analyserContext, props = service.$html5AudioProps;
+
+        function updateAnalysers(time) {
+
+          if (!analyserContext) {
+            var canvas = element.find("canvas")[0];
+
+            if (attrs.width && !isNaN(attrs.width)) {
+              canvas.width = attrs.width;
+            }
+
+            if (attrs.height && !isNaN(attrs.height)) {
+              canvas.height = parseInt(attrs.height);
+            }
+
+            canvasWidth = canvas.width;
+            canvasHeight = canvas.height;
+            analyserContext = canvas.getContext('2d');
+          }
+
+          // analyzer draw code here
+          {
+            var SPACING = 3;
+            var BAR_WIDTH = 1;
+            var numBars = Math.round(canvasWidth / SPACING);
+            var freqByteData = new Uint8Array(props.analyserNode.frequencyBinCount);
+
+            props.analyserNode.getByteFrequencyData(freqByteData);
+
+            analyserContext.clearRect(0, 0, canvasWidth, canvasHeight);
+            //analyserContext.fillStyle = '#F6D565';
+            analyserContext.lineCap = 'round';
+            var multiplier = props.analyserNode.frequencyBinCount / numBars;
+
+            // Draw rectangle for each frequency bin.
+            for (var i = 0; i < numBars; ++i) {
+              var magnitude = 0;
+              var offset = Math.floor(i * multiplier);
+              // gotta sum/average the block, or we miss narrow-bandwidth spikes
+              for (var j = 0; j < multiplier; j++)
+                magnitude += freqByteData[offset + j];
+              magnitude = magnitude / multiplier;
+              var magnitude2 = freqByteData[i * multiplier];
+              if (attrs.waveColor)
+                analyserContext.fillStyle = attrs.waveColor;
+              else
+                analyserContext.fillStyle = "hsl( " + Math.round((i * 360) / numBars) + ", 100%, 50%)";
+              analyserContext.fillRect(i * SPACING, canvasHeight, BAR_WIDTH, -magnitude);
+            }
+          }
+
+          rafID = window.requestAnimationFrame(updateAnalysers);
+        }
+
+        function cancelAnalyserUpdates() {
+          window.cancelAnimationFrame(rafID);
+          rafID = null;
+        }
+
+        element.on('$destroy', function () {
+          cancelAnalyserUpdates();
+        });
+
+        recorder.onRecordStart = (function (original) {
+          return function () {
+            original.apply();
+            updateAnalysers();
+          };
+        })(recorder.onRecordStart);
+
+        utils.appendActionToCallback(recorder, 'onRecordStart', updateAnalysers, 'analyzer');
+        utils.appendActionToCallback(recorder, 'onRecordComplete', cancelAnalyserUpdates, 'analyzer');
+      };
+
+      return {
+        restrict: 'E',
+        require: '^ngAudioRecorder',
+        template: '<div ng-if="!hide" class="audioRecorder-analyzer">' +
+        '<canvas class="analyzer" width="1200" height="400" style="max-width: 100%;"></canvas>' +
+        '</div>',
+        link: link
+      };
+
+    }
+  ]);
+angular.module('angularAudioRecorder.directives')
+  .directive('ngAudioRecorderWaveView', ['recorderService', 'recorderUtils', '$log',
+    function (service, utils, $log) {
+
+      return {
+        restrict: 'E',
+        require: '^ngAudioRecorder',
+        link: function (scope, $element, attrs, recorder) {
+          if (!window.WaveSurfer) {
+            $log.warn('WaveSurfer was found.');
+            return;
+          }
+
+          var audioPlayer;
+          $element.html('<div class="waveSurfer"></div>');
+          var options = angular.extend({container: $element.find('div')[0]}, attrs);
+          var waveSurfer = WaveSurfer.create(options);
+          waveSurfer.setVolume(0);
+          utils.appendActionToCallback(recorder, 'onPlaybackStart|onPlaybackResume', function () {
+            waveSurfer.play();
+          }, 'waveView');
+          utils.appendActionToCallback(recorder, 'onPlaybackComplete|onPlaybackPause', function () {
+            waveSurfer.pause();
+          }, 'waveView');
+
+          utils.appendActionToCallback(recorder, 'onRecordComplete', function () {
+            if (!audioPlayer) {
+              audioPlayer = recorder.getAudioPlayer();
+              audioPlayer.addEventListener('seeking', function (e) {
+                var progress = audioPlayer.currentTime / audioPlayer.duration;
+                waveSurfer.seekTo(progress);
+              });
+            }
+          }, 'waveView');
+
+
+          scope.$watch(function () {
+            return recorder.audioModel;
+          }, function (newBlob) {
+            if (newBlob instanceof Blob) {
+              waveSurfer.loadBlob(newBlob);
+            }
+          });
+        }
+      };
+    }]);
+angular.module('angularAudioRecorder.directives')
+  .directive('ngAudioRecorder', ['recorderService', '$timeout',
+    function (recorderService, $timeout) {
+      return {
+        restrict: 'EA',
+        scope: {
+          audioModel: '=',
+          id: '@',
+          onRecordStart: '&',
+          onRecordComplete: '&',
+          onPlaybackComplete: '&',
+          onPlaybackStart: '&',
+          onPlaybackPause: '&',
+          onPlaybackResume: '&',
+          onConversionStart: '&',
+          onConversionComplete: '&',
+          showPlayer: '=?',
+          autoStart: '=?',
+          convertMp3: '=?',
+          timeLimit: '=?'
+        },
+        controllerAs: 'recorder',
+        bindToController: true,
+        template: function (element, attrs) {
+          return '<div class="audioRecorder">' +
+            '<div style="width: 250px; margin: 0 auto;"><div id="audioRecorder-fwrecorder"></div></div>' +
+            element.html() +
+            '</div>';
+        },
+        controller: 'recorderController',
+        link: function (scope, element, attrs) {
+          $timeout(function () {
+            if (recorderService.isAvailable && !(recorderService.isHtml5 || recorderService.isCordova)) {
+              var params = {
+                'allowscriptaccess': 'always'
+              }, attrs = {
+                'id': 'recorder-app',
+                'name': 'recorder-app'
+              }, flashVars = {
+                'save_text': ''
+              };
+              swfobject.embedSWF(recorderService.getSwfUrl(), "audioRecorder-fwrecorder", "0", "0", "11.0.0", "", flashVars, params, attrs);
+            }
+          }, 100);
+
+        }
+      };
+    }
+  ]);
+
 angular.module('angularAudioRecorder.services', ['angularAudioRecorder.config']);
 angular.module('angularAudioRecorder.services')
   .provider('recorderService', ['recorderScriptUrl',
@@ -626,7 +663,8 @@ angular.module('angularAudioRecorder.services')
         mp3Config = {bitRate: 92, lameJsUrl: scriptPath + '../lib/lame.min.js'},
         audioElementSelector
         ;
-
+      service.mp3Config = mp3Config;
+      
       var swfHandlerConfig = {
         isAvailable: false,
         loaded: false,
@@ -1338,13 +1376,12 @@ angular.module('angularAudioRecorder.services')
   'use strict';
 
   var RecorderWorker = function (me) {
-    var audioContext = new AudioContext();
-
     var recLength = 0,
       recBuffersL = [],
       recBuffersR = [],
       bits = 16,
       targetSampleRate,
+      convertedSampleRate,
       sampleRate;
 
     me.onmessage = function (e) {
@@ -1361,6 +1398,9 @@ angular.module('angularAudioRecorder.services')
         case 'getBuffer':
           getBuffer();
           break;
+        case 'putBuffer':
+          putBuffer(e.data.buffer, e.data.sampleRate);
+          break;
         case 'clear':
           clear();
           break;
@@ -1369,6 +1409,7 @@ angular.module('angularAudioRecorder.services')
 
     function init(config) {
       sampleRate = config.sampleRate;
+      convertedSampleRate = config.sampleRate;
       targetSampleRate = config.targetSampleRate || sampleRate;
     }
 
@@ -1385,23 +1426,26 @@ angular.module('angularAudioRecorder.services')
           var audioBlob = new Blob([dataview], {type: type});
           me.postMessage(audioBlob);
       }
-      if (sampleRate === targetSampleRate) {
-          sendBlob(bufferL, sampleRate);
-      }
-      else {
-          var audioBuffer = audioContext.createBuffer(1, recLength, sampleRate);
-          audioBuffer.copyToChannel(bufferL, 0);
-          resampleAudioBuffer(audioBuffer, targetSampleRate, function(resampeledBuffer) {
-              sendBlob(resampeledBuffer.getChannelData(0), targetSampleRate);
-          });
-      }
+      sendBlob(bufferL, convertedSampleRate);
     }
 
     function getBuffer() {
-      var buffers = [];
-      buffers.push(mergeBuffers(recBuffersL, recLength));
-      buffers.push(mergeBuffers(recBuffersR, recLength));
+      var buffers = {
+          data:[],
+          sampleRate: undefined
+      };
+      buffers.data.push(mergeBuffers(recBuffersL, recLength));
+      buffers.data.push(mergeBuffers(recBuffersR, recLength));
+      buffers.sampleRate = sampleRate;
       me.postMessage(buffers);
+    }
+
+    function putBuffer(buffer, sr) {
+        console.log('in put buffer', buffer, sr);
+        recBuffersL = [buffer[0]];
+        recBuffersR = [buffer[1]];
+        recLength = buffer[0].length;
+        convertedSampleRate = sr;
     }
 
     function clear() {
@@ -1418,25 +1462,6 @@ angular.module('angularAudioRecorder.services')
         offset += recBuffers[i].length;
       }
       return result;
-    }
-
-    function resampleAudioBuffer(audioBuffer, targetSampleRate, done) {
-        var numCh_ = audioBuffer.numberOfChannels;
-        var numFrames_ = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
-
-        var offlineContext_ = new OfflineAudioContext(numCh_, numFrames_, targetSampleRate);
-        var bufferSource_ = offlineContext_.createBufferSource();
-        bufferSource_.buffer = audioBuffer;
-
-        offlineContext_.oncomplete = function(event) {
-            var resampeledBuffer = event.renderedBuffer;
-            done(resampeledBuffer);
-        };
-
-        console.log('Starting Offline Rendering');
-        bufferSource_.connect(offlineContext_.destination);
-        bufferSource_.start(0);
-        offlineContext_.startRendering();
     }
 
     //function interleave(inputL, inputR) {
@@ -1520,7 +1545,7 @@ angular.module('angularAudioRecorder.services')
     this.context.createJavaScriptNode).call(this.context,
       bufferLen, 2, 2);
     var worker;
-    if (false) {
+    if (true) {
         worker = RecorderWorker.toWorker();
     }
     else {
@@ -1584,6 +1609,13 @@ angular.module('angularAudioRecorder.services')
       worker.postMessage({command: 'getBuffer'});
     };
 
+    this.putBuffer = function (buffer, sampleRate) {
+      worker.postMessage({
+          command: 'putBuffer',
+          buffer: buffer,
+          sampleRate: sampleRate
+      });
+  };
     this.exportWAV = function (cb, type) {
       currCallback = cb || config.callback;
       type = type || config.type || 'audio/wav';

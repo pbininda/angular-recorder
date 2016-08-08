@@ -21,13 +21,12 @@
   'use strict';
 
   var RecorderWorker = function (me) {
-    var audioContext = new AudioContext();
-
     var recLength = 0,
       recBuffersL = [],
       recBuffersR = [],
       bits = 16,
       targetSampleRate,
+      convertedSampleRate,
       sampleRate;
 
     me.onmessage = function (e) {
@@ -44,6 +43,9 @@
         case 'getBuffer':
           getBuffer();
           break;
+        case 'putBuffer':
+          putBuffer(e.data.buffer, e.data.sampleRate);
+          break;
         case 'clear':
           clear();
           break;
@@ -52,6 +54,7 @@
 
     function init(config) {
       sampleRate = config.sampleRate;
+      convertedSampleRate = config.sampleRate;
       targetSampleRate = config.targetSampleRate || sampleRate;
     }
 
@@ -68,23 +71,26 @@
           var audioBlob = new Blob([dataview], {type: type});
           me.postMessage(audioBlob);
       }
-      if (sampleRate === targetSampleRate) {
-          sendBlob(bufferL, sampleRate);
-      }
-      else {
-          var audioBuffer = audioContext.createBuffer(1, recLength, sampleRate);
-          audioBuffer.copyToChannel(bufferL, 0);
-          resampleAudioBuffer(audioBuffer, targetSampleRate, function(resampeledBuffer) {
-              sendBlob(resampeledBuffer.getChannelData(0), targetSampleRate);
-          });
-      }
+      sendBlob(bufferL, convertedSampleRate);
     }
 
     function getBuffer() {
-      var buffers = [];
-      buffers.push(mergeBuffers(recBuffersL, recLength));
-      buffers.push(mergeBuffers(recBuffersR, recLength));
+      var buffers = {
+          data:[],
+          sampleRate: undefined
+      };
+      buffers.data.push(mergeBuffers(recBuffersL, recLength));
+      buffers.data.push(mergeBuffers(recBuffersR, recLength));
+      buffers.sampleRate = sampleRate;
       me.postMessage(buffers);
+    }
+
+    function putBuffer(buffer, sr) {
+        console.log('in put buffer', buffer, sr);
+        recBuffersL = [buffer[0]];
+        recBuffersR = [buffer[1]];
+        recLength = buffer[0].length;
+        convertedSampleRate = sr;
     }
 
     function clear() {
@@ -101,25 +107,6 @@
         offset += recBuffers[i].length;
       }
       return result;
-    }
-
-    function resampleAudioBuffer(audioBuffer, targetSampleRate, done) {
-        var numCh_ = audioBuffer.numberOfChannels;
-        var numFrames_ = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
-
-        var offlineContext_ = new OfflineAudioContext(numCh_, numFrames_, targetSampleRate);
-        var bufferSource_ = offlineContext_.createBufferSource();
-        bufferSource_.buffer = audioBuffer;
-
-        offlineContext_.oncomplete = function(event) {
-            var resampeledBuffer = event.renderedBuffer;
-            done(resampeledBuffer);
-        };
-
-        console.log('Starting Offline Rendering');
-        bufferSource_.connect(offlineContext_.destination);
-        bufferSource_.start(0);
-        offlineContext_.startRendering();
     }
 
     //function interleave(inputL, inputR) {
@@ -203,7 +190,7 @@
     this.context.createJavaScriptNode).call(this.context,
       bufferLen, 2, 2);
     var worker;
-    if (false) {
+    if (true) {
         worker = RecorderWorker.toWorker();
     }
     else {
@@ -267,6 +254,13 @@
       worker.postMessage({command: 'getBuffer'});
     };
 
+    this.putBuffer = function (buffer, sampleRate) {
+      worker.postMessage({
+          command: 'putBuffer',
+          buffer: buffer,
+          sampleRate: sampleRate
+      });
+  };
     this.exportWAV = function (cb, type) {
       currCallback = cb || config.callback;
       type = type || config.type || 'audio/wav';

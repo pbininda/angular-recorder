@@ -37,6 +37,8 @@ var RecorderController = function (element, service, recorderUtils, $scope, $tim
     }
   };
 
+  var audioContext = new AudioContext();
+
   var control = this,
     cordovaMedia = {
       recorder: null,
@@ -284,17 +286,51 @@ var RecorderController = function (element, service, recorderUtils, $scope, $tim
       });
     } else if (service.isHtml5) {
       recordHandler.stop();
-      recordHandler.getBuffer(function () {
-        recordHandler.exportWAV(function (blob) {
-          completed(blob);
-          scopeApply();
-        });
+      recordHandler.getBuffer(function (buffers) {
+        if (service.mp3Config.targetSampleRate && service.mp3Config.targetSampleRate !== buffers.sampleRate) {
+            var audioBuffer = audioContext.createBuffer(1, buffers.data[0].length, buffers.sampleRate);
+            audioBuffer.copyToChannel(buffers.data[0], 0);
+            resampleAudioBuffer(audioBuffer, service.mp3Config.targetSampleRate, function(resampeledBuffer) {
+                var buffer = [
+                    resampeledBuffer.getChannelData(0),
+                    []];
+                recordHandler.putBuffer(buffer, service.mp3Config.targetSampleRate);
+                recordHandler.exportWAV(function (blob) {
+                  completed(blob);
+                  scopeApply();
+                });
+            });
+        }
+        else {
+            recordHandler.exportWAV(function (blob) {
+              completed(blob);
+              scopeApply();
+            });
+        }
       });
     } else {
       recordHandler.stopRecording(id);
       completed(recordHandler.getBlob(id));
     }
   };
+
+  function resampleAudioBuffer(audioBuffer, targetSampleRate, done) {
+      var numCh_ = audioBuffer.numberOfChannels;
+      var numFrames_ = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
+
+      var offlineContext_ = new OfflineAudioContext(numCh_, numFrames_, targetSampleRate);
+      var bufferSource_ = offlineContext_.createBufferSource();
+      bufferSource_.buffer = audioBuffer;
+
+      offlineContext_.oncomplete = function(event) {
+          var resampeledBuffer = event.renderedBuffer;
+          done(resampeledBuffer);
+      };
+
+      bufferSource_.connect(offlineContext_.destination);
+      bufferSource_.start(0);
+      offlineContext_.startRendering();
+  }
 
   control.playbackRecording = function () {
     if (status.isPlaying || !service.isAvailable() || status.isRecording || !control.audioModel) {

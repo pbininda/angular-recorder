@@ -14,7 +14,8 @@ angular.module('angularAudioRecorder.services')
         mp3Config = {bitRate: 92, lameJsUrl: scriptPath + '../lib/lame.min.js'},
         audioElementSelector
         ;
-
+      service.mp3Config = mp3Config;
+      
       var swfHandlerConfig = {
         isAvailable: false,
         loaded: false,
