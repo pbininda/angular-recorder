@@ -95,9 +95,9 @@ This is the provider for configuring the `recorderService`.
     - `lameJsUrl : string` : URL path to lame.js, should only be specified it it is not in the lib directory.
     - `bitRate : number`: The [bit rate](https://en.wikipedia.org/wiki/MP3#Bit_rate) of the resulting MP3 file. Must be one of 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256 or 320
 
-- `recorderServiceProvider.withResampling(sampleRate: number) :recorderServiceProvider`:  This tellst the service to do resampling of the recorded data to a given sample rate (only for html5 audio).
+- `recorderServiceProvider.withResampling(sampleRate: number) :recorderServiceProvider`:  This tells the service to do resampling of the recorded data to a given sample rate (only for html5 audio).
 
-- `withPrerecorded.withResampling(selector: string) :recorderServiceProvider`:  This tellst the service take audio data from an `<audio>` element specified by a css selector. This allows testing of the audio encoding etc. with a prerecorded sample.
+- `recorderServiceProvider.withPrerecorded(selector: string) :recorderServiceProvider`:  This tells the service to take audio data from an `<audio>` element specified by a css selector. This allows testing of the audio encoding etc. with a prerecorded sample.
 
     Example:
     put an element like `<audio id="testdata" src="sounds/sample1.wav" type="audio/wav"></audio>` into your html and call `recorderServiceProvider.withPrerecorded('#testdata');`
