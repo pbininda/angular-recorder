@@ -38,6 +38,9 @@ var RecorderController = function (element, service, recorderUtils, $scope, $tim
   };
 
   var audioContext = new AudioContext();
+  $scope.$on('$destroy', function() {
+     audioContext.close(); 
+  });
 
   var control = this,
     cordovaMedia = {
